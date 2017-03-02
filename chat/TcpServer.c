@@ -92,18 +92,20 @@ int main()
                 {
                     bzero(buf, sizeof buf);
                     fgets(buf, sizeof buf, stdin);
-                    if(strcmp(buf, "quit") == 0)
+                    send(confd, buf, sizeof buf, 0);
+                    if(strncasecmp(buf, "quit", 4) == 0)
                     {
                         printf("Quit!\n");
                         break;
                     }
-                    send(confd, buf, sizeof buf, 0);
                 }
                 if(FD_ISSET(confd, &rfds))
                 {
                     bzero(buf, sizeof buf);
                     recv(confd, buf, sizeof buf, 0);
-                    printf("Recv:%s\n", buf);
+                    if(strncasecmp(buf, "quit", 4) == 0)
+                        break;
+                    printf("Recv:%s", buf);
                 }
             }
         }
