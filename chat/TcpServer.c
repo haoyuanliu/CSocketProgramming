@@ -1,90 +1,115 @@
-#include<stdio.h>
-#include<string.h>
-#include<stdlib.h>
-#include<unistd.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <errno.h>
+#include <unistd.h>
 
-#include<sys/types.h>
-#include<sys/socket.h>
-#include<sys/errno.h>
+#include <sys/socket.h>
+#include <arpa/inet.h>
+#include <netinet/in.h>
+#include <sys/types.h>
+#include <sys/time.h>
 
-#include<netinet/in.h>
-#include<arpa/inet.h>
-#include<netdb.h>
-
-#include<pthread.h>
-#include<time.h>
-
-#define RECV_PORT 6000
-#define SEND_PORT 6001
-#define IP "127.0.0.1"
-#define BUFFERSIZE 100
-
-char sendbuf[BUFFERSIZE];
-char recvbuf[BUFFERSIZE];
-time_t lt;
-
-void *threadSend(void *fd)
-{
-    int sockSend = socket(AF_INET, SOCK_STREAM, 0);
-    struct sockaddr_in addrSend;
-    bzero(&addrSend, sizeof addrSend);
-    addrSend.sin_family = AF_INET;
-    addrSend.sin_addr.s_addr = inet_addr(IP);
-    addrSend.sin_port = htons(SEND_PORT);
-    connect(sockSend, (struct sockaddr *)&addrSend, sizeof addrSend);
-    bzero(sendbuf, sizeof sendbuf);
-    while(fgets(sendbuf, sizeof sendbuf, stdin) != 0)
-    {
-        send(sockSend, sendbuf, sizeof sendbuf, 0);
-        bzero(sendbuf, sizeof sendbuf);
-    }
-    exit(0);
-    free(fd);
-    pthread_exit(NULL);
-}
-
-void *threadRecv(void *fd)
-{
-    int sockRecv = socket(AF_INET, SOCK_STREAM, 0);
-    struct sockaddr_in addrRecv;
-    bzero(&addrRecv, sizeof addrRecv);
-    addrRecv.sin_family = AF_INET;
-    addrRecv.sin_addr.s_addr = INADDR_ANY;
-    addrRecv.sin_port = htons(RECV_PORT);
-    bind(sockRecv, (struct sockaddr *)&addrRecv, sizeof addrRecv);
-    listen(sockRecv, 5);
-    int connFd = accept(sockRecv, NULL, NULL);
-    bzero(recvbuf, sizeof recvbuf);
-    while(1)
-    {
-        recv(connFd, recvbuf, sizeof recvbuf, 0);
-        printf("Recv:%s", recvbuf);
-        printf("..........");
-        printf(ctime(&lt), stdout);
-        bzero(recvbuf, sizeof recvbuf);
-    }
-    exit(0);
-    free(fd);
-    pthread_exit(NULL);
-}
+#define BUFFERSIZE 1024
+#define PORT 6000
+#define LISTNUM 20
 
 int main()
 {
-    lt = time(NULL);
-    pthread_t pthread_recv;
-    int fd_recv = pthread_create(&pthread_recv, NULL, threadRecv, NULL);
-    if(fd_recv != 0)
-        perror("Thread recv creat error!");
+    int sockfd, confd;
+    struct sockaddr_in addrServer, addrClient;
+    socklen_t len;
+    char buf[BUFFERSIZE];
+    unsigned int port, listnum;
+    fd_set rfds;
+    struct timeval tv;
+    int retval, maxfd;
 
-    pthread_t pthread_send;
-    int fd_send = pthread_create(&pthread_send, NULL, threadSend, NULL);
-    if(fd_send != 0)
-        perror("Thread sent creat error!");
+    if((sockfd = socket(PF_INET, SOCK_STREAM, 0)) == -1)
+    {
+        perror("Server create socket error!");
+        exit(errno);
+    }
+    else
+        printf("Server socket created!\n");
 
+    bzero(&addrServer, sizeof addrServer);
+    addrServer.sin_family = AF_INET;
+    addrServer.sin_addr.s_addr = htons(INADDR_ANY);
+    addrServer.sin_port = htons(PORT);
 
+    if((bind(sockfd, (struct sockaddr *)&addrServer, sizeof(struct sockaddr))) == -1)
+    {
+        perror("Server bind error!\n");
+        exit(errno);
+    }
+    else
+        printf("Bind success!\n");
+    if(listen(sockfd, listnum) == -1)
+    {
+        perror("Server listen error!");
+        exit(errno);
+    }
+    else
+        printf("Server listen success!\n");
 
-    while(1) { }
-
-    exit(0);
-    return EXIT_SUCCESS;
+    while(1)
+    {
+        len = sizeof(struct sockaddr);
+        if((confd = accept(sockfd, (struct sockaddr*)&addrClient, &len)) == -1)
+        {
+            perror("Server accept error");
+            exit(errno);
+        }
+        else
+        {
+            printf("Connected to: %s:%d\n", inet_ntoa(addrClient.sin_addr), ntohs(addrClient.sin_port));
+        }
+        while(1)
+        {
+            FD_ZERO(&rfds);
+            FD_SET(0, &rfds);
+            maxfd = 0;
+            FD_SET(confd, &rfds);
+            if(maxfd < confd)
+                maxfd = confd;
+            tv.tv_sec = 6;
+            tv.tv_usec = 0;
+            retval = select(maxfd+1, &rfds, NULL, NULL, &tv);
+            if(retval == -1)
+            {
+                perror("Select error!");
+                break;
+            }
+            else if(retval == 0)
+            {
+                printf("Server waiting!\n");
+                continue;
+            }
+            else
+            {
+                if(FD_ISSET(0, &rfds))
+                {
+                    bzero(buf, sizeof buf);
+                    fgets(buf, sizeof buf, stdin);
+                    if(strcmp(buf, "quit") == 0)
+                    {
+                        printf("Quit!\n");
+                        break;
+                    }
+                    send(confd, buf, sizeof buf, 0);
+                }
+                if(FD_ISSET(confd, &rfds))
+                {
+                    bzero(buf, sizeof buf);
+                    recv(confd, buf, sizeof buf, 0);
+                    printf("Recv:%s\n", buf);
+                }
+            }
+        }
+        close(confd);
+        break;
+    }
+    close(sockfd);
+    return 0;
 }
